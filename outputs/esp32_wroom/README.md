@@ -5,6 +5,14 @@ Complete guide and source files to run the trained INT8 Voice Activator on an **
 
 ---
 
+## 🌟 Key Feature: On-Device Keyword Enrollment
+**You can change the custom keyword directly on the ESP32 using only the onboard BOOT button and microphone!**
+- No computer or USB connection needed.
+- No re-flashing or model retraining.
+- Keywords are saved into the ESP32's **Flash NVS memory** and persist across power cycles.
+
+---
+
 ## 1. Hardware Specifications & Pinout
 
 ### Required Hardware
@@ -23,23 +31,36 @@ Complete guide and source files to run the trained INT8 Voice Activator on an **
 | **WS** (Word Select) | **GPIO 15** | I2S Word Select / LR Clock (`I2S_WS_PIN`) |
 | **L/R** (Channel) | **GND** | Connect to GND for Left Channel Mono |
 
-### Indicators & Trigger Pins
-- **GPIO 2**: Onboard Blue LED (Lights up for 1.5s when keyword is detected).
-- **GPIO 4**: High-level wake pulse (Connect to host MCU or remote system to trigger ASR handover).
+### Onboard Buttons & Indicators
+- **GPIO 0 (BOOT Button)**: 
+  - **Hold for 2 seconds**: Enters **On-Device Keyword Enrollment Mode**.
+  - **Hold for 5 seconds**: Resets custom keyword back to firmware default.
+- **GPIO 2 (Blue LED)**:
+  - **Solid ON**: "Speak your keyword now!" (During enrollment).
+  - **Double Blink**: Shot recorded successfully.
+  - **Lit for 1.5s**: Keyword detected during live listening.
+- **GPIO 4**: High-level wake pulse (Connect to host MCU to trigger ASR handover).
 
 ---
 
-## 2. Memory Footprint on ESP32-WROOM
+## 2. How to Change Keyword Directly on the ESP32 (No PC Needed!)
 
-| Memory Type | Required by Voice Activator | Total Available on ESP32-WROOM | Headroom Remaining |
-| :--- | :--- | :--- | :--- |
-| **Flash** | **56.4 KB** (TFLite INT8 model) | 4,096 KB (4 MB) | **98.6% free** (Plenty of room for WiFi/BLE) |
-| **Internal SRAM** | **63.0 KB** (Tensor Arena) + **31.3 KB** (Ring Buffer) = **94.3 KB** | ~320 KB (Free internal heap) | **~225 KB free** |
-| **Inference Time** | **~35 - 45 ms** | 50 ms budget | **Real-time 1.0x capable** |
+1. Power on the ESP32 (via USB, battery pack, or 5V pin).
+2. **Press and hold the onboard BOOT button for 2 seconds** until the blue LED turns ON, then release it.
+   *(Alternatively, if connected to Serial Monitor, type `enroll` and press Enter).*
+3. The ESP32 enters Enrollment Mode:
+   - **Shot 1**: When the blue LED turns **solid ON**, speak your new keyword clearly (e.g. *"JARVIS"*). The LED blinks twice when recorded.
+   - **Shot 2**: When the blue LED turns **solid ON** again, speak the keyword a second time.
+   - **Shot 3**: When the blue LED turns **solid ON** again, speak the keyword a third time.
+4. The ESP32 computes the new 32-D centroid vector, validates unit norm, and writes it to **Flash NVS**.
+5. The blue LED flashes **6 rapid pulses**: Enrollment is complete!
+6. The ESP32 immediately starts listening for your new keyword!
+
+> **Note**: Your new keyword is saved in non-volatile flash. It **remains active even after unplugging or rebooting** the board.
 
 ---
 
-## 3. Deployment via Arduino IDE (Simplest Method)
+## 3. Deployment via Arduino IDE (Initial Setup)
 
 ### Step 1: Install Arduino Board & Library
 1. Open **Arduino IDE** (v2.x recommended).
@@ -51,13 +72,7 @@ Complete guide and source files to run the trained INT8 Voice Activator on an **
 4. Go to **Sketch -> Include Library -> Manage Libraries**, search for `TensorFlowLite_ESP32` by **Tanaka Masayuki**, and click **Install**.
 
 ### Step 2: Open the Sketch Folder
-Create a folder named `voice_activator_esp32_wroom` and place these files inside it:
-- `voice_activator_esp32_wroom.ino`
-- `tflite_micro_model.h`
-- `keyword_prototype.h`
-- `feature_extractor.h`
-- `audio_ring_buffer.h`
-- `activator_state_machine.h`
+Open `voice_activator_esp32_wroom.ino` from this folder in Arduino IDE.
 
 ### Step 3: Configure Board Settings
 In the Arduino IDE **Tools** menu:
@@ -71,35 +86,15 @@ In the Arduino IDE **Tools** menu:
 ### Step 4: Compile & Upload
 1. Click **Upload** (Arrow icon).
 2. Open **Tools -> Serial Monitor** at **115200 baud**.
-3. Speak your enrolled keyword (e.g., **"ASWIN"**) into the INMP441 microphone.
-4. The onboard blue LED will illuminate and the serial monitor will output:
-   ```
-   >>> ========================================================
-   >>> [ACTIVATION EVENT] Target Keyword 'ASWIN' Detected!
-   >>> Cosine Similarity: 0.9142 | Inference Latency: 38 ms
-   >>> Triggering Wake GPIO & Dispatching ASR Handover...
-   >>> ========================================================
-   ```
+3. Speak your keyword into the INMP441 microphone to trigger activation!
 
 ---
 
-## 4. Deployment via PlatformIO (VS Code)
+## 4. Memory Footprint on ESP32-WROOM
 
-If using VS Code with PlatformIO:
-1. Open this folder in PlatformIO.
-2. The included `platformio.ini` automatically pulls `TensorFlowLite_ESP32`.
-3. Run:
-   ```bash
-   pio run --target upload && pio device monitor
-   ```
-
----
-
-## 5. Changing the Custom Keyword
-To switch the enrolled keyword to a different word:
-1. Run on your PC:
-   ```bash
-   python scripts/enroll_keyword.py --keyword <NEW_WORD> --mic
-   ```
-2. Replace `keyword_prototype.h` in the ESP32 project folder with the newly generated `src/deployment/esp32/keyword_prototype.h`.
-3. Re-flash the ESP32. **No model retraining or weights change needed!**
+| Memory Type | Required by Voice Activator | Total Available on ESP32-WROOM | Headroom Remaining |
+| :--- | :--- | :--- | :--- |
+| **Flash** | **56.4 KB** (TFLite INT8 model) | 4,096 KB (4 MB) | **98.6% free** |
+| **Internal SRAM** | **64.0 KB** (Tensor Arena) + **31.3 KB** (Ring Buffer) = **95.3 KB** | ~320 KB (Free internal heap) | **~224 KB free** |
+| **NVS Storage** | **128 bytes** (32 floats prototype) | 20 KB default NVS partition | **99.3% free** |
+| **Inference Time** | **~35 - 45 ms** | 50 ms streaming chunk | **Real-time 1.0x capable** |
