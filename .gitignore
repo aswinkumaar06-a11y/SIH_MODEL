@@ -1,0 +1,82 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# C extensions
+*.obj
+*.o
+*.a
+*.lib
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Datasets (large audio binaries)
+data/raw/speech_commands/*
+!data/raw/speech_commands/.gitkeep
+data/raw/common_voice/*
+!data/raw/common_voice/.gitkeep
+data/raw/custom_keywords/*
+!data/raw/custom_keywords/.gitkeep
+data/raw/noise/*
+!data/raw/noise/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/metadata/*.csv
+data/raw/*.tar.gz
+data/raw/*.zip
+data/raw/*.tar
+
+# Model checkpoints & artifacts
+models/saved/*
+!models/saved/.gitkeep
+models/checkpoints/*
+!models/checkpoints/*.weights.h5
+!models/checkpoints/.gitkeep
+models/tflite/*
+!models/tflite/*.tflite
+!models/tflite/.gitkeep
+
+# Live test outputs
+outputs/live_test/*
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing & caches
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE / Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary scratch files
+write_helper.py
+
+# OS generated files
+.DS_Store
+Thumbs.db
+ehthumbs.db
