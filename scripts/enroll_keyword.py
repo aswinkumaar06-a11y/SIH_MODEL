@@ -192,6 +192,14 @@ static const float KEYWORD_PROTOTYPE[KEYWORD_PROTOTYPE_DIM] = {{
     with open(output_header, "w", encoding="utf-8") as f:
         f.write(header_content)
 
+    # Auto-sync to ESP32-WROOM deployment directories if present
+    base_proj_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    for wroom_dir in [os.path.join(base_proj_dir, 'outputs', 'esp32_wroom'), os.path.join(base_proj_dir, 'src', 'deployment', 'esp32_wroom')]:
+        if os.path.exists(wroom_dir):
+            wroom_header = os.path.join(wroom_dir, 'keyword_prototype.h')
+            with open(wroom_header, 'w', encoding='utf-8') as fw:
+                fw.write(header_content)
+
     return {
         "keyword": keyword_name.upper(),
         "shots_count": len(audio_files),
