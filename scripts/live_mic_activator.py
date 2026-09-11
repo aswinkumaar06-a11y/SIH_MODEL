@@ -145,7 +145,7 @@ def run_live_mic(keyword: str = None, threshold: float = 0.88):
                 audio_chunk = audio_chunk.flatten()
                 current_time_ms = (time.time() - start_time) * 1000.0
 
-                ring_buffer.write(audio_chunk)
+                ring_buffer.append(audio_chunk)
                 rms = np.sqrt(np.mean(audio_chunk**2) + 1e-9)
 
                 # VAD Gating
@@ -155,7 +155,7 @@ def run_live_mic(keyword: str = None, threshold: float = 0.88):
                     continue
 
                 # Extract 1.0s window
-                audio_window = ring_buffer.read_window(16000)
+                audio_window = ring_buffer.get_snapshot()
                 mfcc = feature_extractor.extract(audio_window)
                 tensor = np.expand_dims(np.expand_dims(mfcc, axis=0), axis=-1).astype(in_dtype)
 

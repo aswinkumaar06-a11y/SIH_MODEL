@@ -61,3 +61,9 @@ class AudioRingBuffer:
         self.buffer.fill(0)
         self.write_pos = 0
         self.total_samples_written = 0
+
+    def write(self, chunk):
+        return self.append(chunk)
+
+    def read_window(self, n_samples=None):
+        return self.get_snapshot()
