@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-09-11 10:10:01",
+  "timestamp": "2026-09-11 10:25:41",
   "problem_statement": "SIH 26172 - Low Latency and Efficient Voice Activator for Edge Devices",
   "organization": "Indian Space Research Organisation (ISRO)",
   "enrollment_stage": {
@@ -36,7 +36,7 @@
       "threshold_tau_high": 0.9,
       "rejection_successful": true
     },
-    "average_per_chunk_inference_ms": 0.36,
+    "average_per_chunk_inference_ms": 0.38,
     "real_time_factor": 0.0
   },
   "asr_handover_stage": {

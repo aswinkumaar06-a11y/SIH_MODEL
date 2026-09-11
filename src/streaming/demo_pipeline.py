@@ -31,13 +31,27 @@ class EndToEndVoiceActivatorDemo:
     """
     def __init__(
         self,
-        tflite_model_path: str = r"D:\SIH_Model\models\tflite\voice_activator_int8.tflite",
+        tflite_model_path: Optional[str] = None,
         sample_rate: int = 16000,
         chunk_size_ms: int = 50,
         tau_high: float = 0.88,
         tau_low: float = 0.84,
         persistence: int = 4
     ):
+        if tflite_model_path is None or not os.path.exists(tflite_model_path):
+            repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+            candidate = os.path.join(repo_root, "models", "tflite", "voice_activator_int8.tflite")
+            if os.path.exists(candidate):
+                tflite_model_path = candidate
+            elif tflite_model_path and os.path.exists(tflite_model_path):
+                pass
+            else:
+                legacy_path = r"D:\SIH_Model\models\tflite\voice_activator_int8.tflite"
+                if os.path.exists(legacy_path):
+                    tflite_model_path = legacy_path
+                else:
+                    raise FileNotFoundError(f"Model not found at {candidate} or {legacy_path}")
+
         self.sample_rate = sample_rate
         self.chunk_size = int(sample_rate * (chunk_size_ms / 1000.0))  # 800 samples
         self.chunk_size_ms = chunk_size_ms
@@ -156,7 +170,8 @@ class EndToEndVoiceActivatorDemo:
                     "event": "ASR_HANDOVER_DISPATCHED",
                     "timestamp_ms": timestamp_ms,
                     "asr_transcription": asr_result,
-                    "buffer_duration_sec": 2.0
+                    "buffer_duration_sec": 2.0,
+                    "audio_payload": handover_payload
                 }
 
         if not self.ring_buffer.is_full():
