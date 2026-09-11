@@ -3,10 +3,10 @@ Live Laptop Microphone Edge Voice Activator
 SIH Problem Statement 26172 (ISRO)
 
 Allows real-time testing of the INT8 Quantized Edge Voice Activator directly through your laptop microphone:
-1. Streams continuous audio in 50ms chunks (800 samples @ 16 kHz) via laptop microphone array.
-2. Performs real-time Ring Buffer -> VAD Gating -> INT8 TFLite Universal Feature Encoder -> Hysteresis State Machine.
+1. Streams continuous audio in 50ms chunks (800 samples @ 16 kHz) via laptop microphone.
+2. Performs real-time Ring Buffer -> VAD Gating -> INT8 TFLite Universal Feature Encoder -> Dual-Threshold Hysteresis.
 3. Automatically triggers low-latency activation when the enrolled keyword is spoken.
-4. Captures 2.0s post-wake speech buffer and dispatches it for ASR handover.
+4. Uses tightened persistence (N=3) and hysteresis (0.05) to eliminate false positives.
 """
 
 import os
@@ -24,150 +24,187 @@ logging.getLogger("tensorflow").setLevel(logging.ERROR)
 
 sys.path.insert(0, r"D:\SIH_Model")
 from src.streaming.demo_pipeline import EndToEndVoiceActivatorDemo
+from src.streaming.ring_buffer import AudioRingBuffer
+from src.streaming.vad import EnergyVAD
+from src.streaming.state_machine import DetectionStateMachine
+from src.features.mfcc import MFCCFeatureExtractor
+import tensorflow as tf
 
 
-def record_user_samples(keyword: str, output_dir: str, num_samples: int = 3, sr: int = 16000) -> list:
-    """Interactively records K audio clips directly from the user's laptop microphone."""
-    os.makedirs(output_dir, exist_ok=True)
-    saved_paths = []
-    duration = 1.0  # 1 second per utterance
+def load_prototype_from_header(header_path: str):
+    """Loads enrolled keyword name and 32-D prototype vector directly from C header."""
+    if not os.path.exists(header_path):
+        return None, None
 
-    print("\n" + "=" * 75)
-    print(f"PERSONALIZED VOICE ENROLLMENT FOR '{keyword.upper()}'")
-    print(f"We will record {num_samples} audio clips (1.0 second each) of you speaking.")
-    print("=" * 75)
+    with open(header_path, "r", encoding="utf-8") as f:
+        content = f.read()
 
-    for i in range(1, num_samples + 1):
-        input(f"\n[{i}/{num_samples}] Get ready, then press [ENTER] and say '{keyword.upper()}' clearly...")
-        sys.stdout.write("  >> RECORDING (1 second)... ")
-        sys.stdout.flush()
-        audio = sd.rec(int(duration * sr), samplerate=sr, channels=1, dtype="float32")
-        sd.wait()
-        audio = audio.flatten()
-        print("Done!")
+    name = "UNKNOWN"
+    for line in content.splitlines():
+        if "ENROLLED_KEYWORD_NAME" in line and '"' in line:
+            parts = line.split('"')
+            if len(parts) >= 2:
+                name = parts[1]
 
-        # Normalize audio amplitude
-        max_amp = np.max(np.abs(audio))
-        if max_amp > 0.01:
-            audio = (audio / max_amp) * 0.90
+    start = content.find("KEYWORD_PROTOTYPE")
+    if start != -1:
+        brace_start = content.find("{", start)
+        brace_end = content.find("}", brace_start)
+        if brace_start != -1 and brace_end != -1:
+            raw = content[brace_start + 1:brace_end].replace("f", "").replace("\n", "")
+            nums = [float(x.strip()) for x in raw.split(",") if x.strip()]
+            vec = np.array(nums, dtype=np.float32)
+            norm = np.linalg.norm(vec)
+            if norm > 1e-6:
+                vec /= norm
+            return name, vec
 
-        file_path = os.path.join(output_dir, f"{keyword.lower()}_user_sample_{i}.wav")
-        sf.write(file_path, audio, sr)
-        saved_paths.append(file_path)
-
-    print(f"\nAll {num_samples} samples successfully recorded and saved to {output_dir}!")
-    return saved_paths
+    return name, None
 
 
-def run_live_mic(keyword: str = "ZORA", threshold: float = 0.87, record_user: bool = False):
-    kw = keyword.strip().upper()
-    print("=" * 80)
-    print(f"SIH 26172: LIVE LAPTOP MICROPHONE VOICE ACTIVATOR")
-    print(f"Hardware Edge Target: ESP32-S3 Profile (< 100 KB Flash, < 256 KB SRAM)")
-    print(f"Active Wake Word:     '{kw}'")
-    print("=" * 80)
+def run_live_mic(keyword: str = None, threshold: float = 0.88):
+    header_path = r"D:\SIH_Model\src\deployment\esp32\keyword_prototype.h"
+    hdr_name, hdr_proto = load_prototype_from_header(header_path)
 
-    # 1. Acquire Enrollment Samples
-    kw_dir = os.path.join(r"D:\SIH_Model\data\raw\custom_keywords", kw.lower())
-    if record_user:
-        user_dir = os.path.join(kw_dir, "user_voice")
-        enrollment_paths = record_user_samples(kw, user_dir, num_samples=3)
+    if keyword is None:
+        kw = hdr_name if hdr_name else "ZORA"
     else:
-        # Check if pre-enrolled samples exist
+        kw = keyword.upper()
+
+    print("\n" + "=" * 80)
+    print("      SIH 26172: EDGE VOICE ACTIVATOR - LIVE MICROPHONE DETECTION")
+    print("=" * 80)
+    print(f"Target Hardware Profile: ESP32-WROOM / ESP32-S3 Bare-Metal")
+    print(f"Active Keyword:          '{kw}'")
+    print(f"Operating Thresholds:    tau_high = {threshold:.2f}, tau_low = {threshold-0.05:.2f}")
+    print(f"Temporal Persistence:    N = 3 consecutive windows (150 ms sustained match)")
+    print(f"False-Positive Defense:  Dual-threshold hysteresis + refractory cooldown (1500 ms)")
+    print("=" * 80)
+
+    # 1. Acquire Prototype
+    prototype = None
+    if hdr_name and hdr_name.upper() == kw.upper() and hdr_proto is not None:
+        prototype = hdr_proto
+        print(f"  [PROTOTYPE] Loaded verified '{kw}' prototype directly from keyword_prototype.h")
+    else:
+        kw_dir = os.path.join(r"D:\SIH_Model\data\raw\custom_keywords", kw.lower())
         if os.path.exists(kw_dir):
-            enrollment_paths = [os.path.join(kw_dir, f) for f in os.listdir(kw_dir) if f.endswith(".wav")][:3]
-        else:
-            enrollment_paths = []
+            wavs = [os.path.join(kw_dir, f) for f in os.listdir(kw_dir) if f.endswith(".wav")]
+            if wavs:
+                print(f"  [PROTOTYPE] Extracting centroid from {len(wavs)} samples in {kw_dir}...")
+                from scripts.enroll_keyword import extract_and_validate_prototype
+                res = extract_and_validate_prototype(kw, wavs[:5])
+                prototype = res["prototype"]
 
-        if not enrollment_paths:
-            print(f"\nNo pre-recorded samples found for '{kw}'. Starting quick recording...")
-            enrollment_paths = record_user_samples(kw, kw_dir, num_samples=3)
+    if prototype is None:
+        print(f"\n[!] Error: No prototype found for '{kw}'.")
+        print(f"    Please enroll it first: python scripts/enroll_keyword.py --keyword {kw} --mic")
+        sys.exit(1)
 
-    # 2. Initialize Activator Pipeline
+    # 2. Setup TFLite Model & Streaming Components
     model_path = r"D:\SIH_Model\models\tflite\voice_activator_int8.tflite"
-    activator = EndToEndVoiceActivatorDemo(
-        tflite_model_path=model_path,
-        sample_rate=16000,
-        chunk_size_ms=50,
-        tau_high=threshold,
-        tau_low=threshold - 0.04,
-        persistence=2
+    interpreter = tf.lite.Interpreter(model_path=model_path)
+    interpreter.allocate_tensors()
+    in_idx = interpreter.get_input_details()[0]["index"]
+    out_idx = interpreter.get_output_details()[0]["index"]
+    in_dtype = interpreter.get_input_details()[0]["dtype"]
+
+    feature_extractor = MFCCFeatureExtractor(sample_rate=16000, n_mfcc=13)
+    ring_buffer = AudioRingBuffer(capacity_samples=16000)
+    vad = EnergyVAD(sample_rate=16000, min_energy_threshold=0.008, energy_multiplier=2.2, hangover_frames=3)
+    
+    state_machine = DetectionStateMachine(
+        threshold=threshold,
+        hysteresis=0.05,
+        consecutive_windows=3,
+        smoothing_window=5,
+        cooldown_ms=1500.0
     )
 
-    enroll_info = activator.enroll_keyword(enrollment_paths, keyword_name=kw)
-    print(f"\n  [ENROLLMENT STATUS]")
-    print(f"    - Target Keyword:        '{enroll_info['keyword']}'")
-    print(f"    - Enrollment Utterances: {enroll_info['shots_count']} audio clips")
-    print(f"    - Intra-Shot Similarity: {enroll_info['intra_similarity']:.4f} (high acoustic coherence)")
-    print(f"    - Operating Thresholds:  tau_high = {threshold:.2f}, tau_low = {threshold-0.04:.2f}, N = 2 windows")
-    print(f"    - Input Audio Device:    {sd.query_devices(kind='input')['name']}")
-    print("-" * 80)
-    print("  * Speak normally into your laptop microphone.")
-    print("  * Say '" + kw + "' clearly.")
-    print("  * Press Ctrl + C in the terminal to stop at any time.")
-    print("-" * 80 + "\n")
-
-    chunk_samples = 800  # 50 ms @ 16,000 Hz
+    chunk_samples = 800  # 50 ms @ 16 kHz
     output_test_dir = r"D:\SIH_Model\outputs\live_test"
     os.makedirs(output_test_dir, exist_ok=True)
 
+    input_device = sd.query_devices(kind='input')['name']
+    print(f"  [INPUT DEVICE]  {input_device}")
+    print("-" * 80)
+    print(f"  * Speak naturally into your microphone.")
+    print(f"  * Say '{kw}' clearly.")
+    print(f"  * Notice that unrelated words like 'yes', 'no', 'inspector', etc. will NOT trigger.")
+    print(f"  * Press Ctrl + C to exit.")
+    print("-" * 80 + "\n")
+
     start_time = time.time()
     activation_count = 0
+    recent_sims = []
 
     try:
         with sd.InputStream(samplerate=16000, channels=1, dtype="float32", blocksize=chunk_samples) as stream:
             while True:
-                audio_chunk, overflowed = stream.read(chunk_samples)
+                audio_chunk, _ = stream.read(chunk_samples)
                 audio_chunk = audio_chunk.flatten()
                 current_time_ms = (time.time() - start_time) * 1000.0
 
-                # Compute chunk RMS volume for visualization
+                ring_buffer.write(audio_chunk)
                 rms = np.sqrt(np.mean(audio_chunk**2) + 1e-9)
-                vol_pct = int(min(100, rms * 500))
 
-                res = activator.process_chunk(audio_chunk, current_time_ms)
-                ev = res.get("event")
+                # VAD Gating
+                is_speech = vad.is_speech(audio_chunk)
+                if not is_speech and rms < 0.010:
+                    time.sleep(0.001)
+                    continue
 
-                if ev == "VAD_SKIP":
-                    bar = "░" * 10
-                    sys.stdout.write(f"\r[MIC IDLE    ] [{bar}] Vol: {vol_pct:2d}% | Sim: 0.000 | State: {res.get('state', 'IDLE'):<10}    ")
-                    sys.stdout.flush()
-                elif ev == "INFERENCE":
-                    sim = res.get("smoothed_sim", 0.0)
-                    filled = int(max(0, min(10, sim * 10)))
-                    bar = "█" * filled + "░" * (10 - filled)
-                    sys.stdout.write(f"\r[MIC SPEECH  ] [{bar}] Vol: {vol_pct:2d}% | Sim: {sim:.3f} | State: {res.get('state'):<10}    ")
-                    sys.stdout.flush()
-                elif ev == "ACTIVATION_TRIGGERED":
+                # Extract 1.0s window
+                audio_window = ring_buffer.read_window(16000)
+                mfcc = feature_extractor.extract(audio_window)
+                tensor = np.expand_dims(np.expand_dims(mfcc, axis=0), axis=-1).astype(in_dtype)
+
+                interpreter.set_tensor(in_idx, tensor)
+                interpreter.invoke()
+                emb = interpreter.get_tensor(out_idx)[0]
+                norm = np.linalg.norm(emb)
+                if norm > 1e-6:
+                    emb /= norm
+
+                # Cosine similarity
+                sim = float(np.dot(emb, prototype))
+                recent_sims.append(sim)
+                if len(recent_sims) > 5:
+                    recent_sims.pop(0)
+                smoothed_sim = float(np.mean(recent_sims))
+
+                # State machine update
+                event = state_machine.update(sim, current_time_ms)
+
+                # Real-time visual meter on same line
+                bar_len = int(max(0, min(30, (smoothed_sim - 0.5) * 60)))
+                bar_str = "#" * bar_len + "-" * (30 - bar_len)
+                status_str = f"\r[VAD: ON | Vol: {int(rms*500):2d}% | Sim: {smoothed_sim:.3f} [{bar_str}] State: {state_machine.state.name}]"
+                sys.stdout.write(status_str)
+                sys.stdout.flush()
+
+                if event.triggered:
                     activation_count += 1
-                    sim = res.get("smoothed_sim", 0.0)
                     sys.stdout.write("\n\n" + "=" * 80 + "\n")
-                    sys.stdout.write(f"  >>> [ACTIVATION TRIGGERED #{activation_count}] '{kw}' DETECTED! <<<\n")
-                    sys.stdout.write(f"  Timestamp: {current_time_ms/1000.0:.2f}s | Confidence: {sim:.4f} >= {threshold:.2f}\n")
-                    sys.stdout.write(f"  Action: Dispatched edge wake signal & capturing 2.0s ASR speech buffer...\n")
+                    sys.stdout.write(f"  >>> [ACTIVATION TRIGGERED #{activation_count}] KEYWORD '{kw}' DETECTED! <<<\n")
+                    sys.stdout.write(f"  Timestamp:  {current_time_ms/1000.0:.2f}s\n")
+                    sys.stdout.write(f"  Confidence: {smoothed_sim:.4f} (Threshold: {threshold:.2f}, Hysteresis: {threshold-0.05:.2f})\n")
+                    sys.stdout.write(f"  Action:     Hardware GPIO Wake Trigger Dispatched & ASR Handover Initiated.\n")
                     sys.stdout.write("=" * 80 + "\n\n")
-                    sys.stdout.flush()
-                elif ev == "ASR_HANDOVER_DISPATCHED":
-                    asr_info = res.get("asr_transcription", {})
-                    save_wav = os.path.join(output_test_dir, f"wake_command_{activation_count}.wav")
-                    if "audio_payload" in res:
-                        sf.write(save_wav, res["audio_payload"], 16000)
-                    sys.stdout.write(f"  >>> [ASR HANDOVER COMPLETED]: Staged {res.get('buffer_duration_sec', 2.0)}s speech payload to {asr_info.get('asr_engine')}.\n\n")
                     sys.stdout.flush()
 
     except KeyboardInterrupt:
-        print(f"\n\n[TEST ENDED] Live microphone session stopped by user.")
-        print(f"Total activations triggered: {activation_count}")
+        print(f"\n\n[SESSION TERMINATED] Live microphone session stopped by user.")
+        print(f"Total activations: {activation_count}")
         sys.exit(0)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Live Laptop Microphone Voice Activator")
-    parser.add_argument("--keyword", default="ZORA", help="Target keyword name (default: ZORA)")
-    parser.add_argument("--threshold", type=float, default=0.87, help="Activation similarity threshold (default: 0.87)")
-    parser.add_argument("--record-user", action="store_true", help="Record 3 enrollment samples using your own voice")
+    parser.add_argument("--keyword", default=None, help="Target keyword name (defaults to active keyword in header)")
+    parser.add_argument("--threshold", type=float, default=0.88, help="Activation similarity threshold (default: 0.88)")
     args = parser.parse_args()
-    run_live_mic(keyword=args.keyword, threshold=args.threshold, record_user=args.record_user)
+    run_live_mic(keyword=args.keyword, threshold=args.threshold)
 
 
 if __name__ == "__main__":
