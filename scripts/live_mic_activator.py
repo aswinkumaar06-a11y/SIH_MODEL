@@ -174,16 +174,18 @@ def run_live_mic(keyword: str = None, threshold: float = 0.88):
                 smoothed_sim = float(np.mean(recent_sims))
 
                 # State machine update
-                event = state_machine.update(sim, current_time_ms)
+                sm_res = state_machine.process_similarity(sim, current_time_ms)
+                current_state = sm_res["state"]
+                smoothed_sim = sm_res["smoothed_similarity"]
 
                 # Real-time visual meter on same line
                 bar_len = int(max(0, min(30, (smoothed_sim - 0.5) * 60)))
                 bar_str = "#" * bar_len + "-" * (30 - bar_len)
-                status_str = f"\r[VAD: ON | Vol: {int(rms*500):2d}% | Sim: {smoothed_sim:.3f} [{bar_str}] State: {state_machine.state.name}]"
+                status_str = f"\r[VAD: ON | Vol: {int(rms*500):2d}% | Sim: {smoothed_sim:.3f} [{bar_str}] State: {current_state}]"
                 sys.stdout.write(status_str)
                 sys.stdout.flush()
 
-                if event.triggered:
+                if sm_res["is_activated"]:
                     activation_count += 1
                     sys.stdout.write("\n\n" + "=" * 80 + "\n")
                     sys.stdout.write(f"  >>> [ACTIVATION TRIGGERED #{activation_count}] KEYWORD '{kw}' DETECTED! <<<\n")

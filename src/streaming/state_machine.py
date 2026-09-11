@@ -92,3 +92,14 @@ class DetectionStateMachine:
         self.similarity_history.clear()
         self.consecutive_count = 0
         self.cooldown_until_ms = 0.0
+
+    def update(self, raw_similarity: float, timestamp_ms: float):
+        """Compatibility alias returning an object with .triggered and .state."""
+        res = self.process_similarity(raw_similarity, timestamp_ms)
+        class Event:
+            pass
+        ev = Event()
+        ev.triggered = res["is_activated"]
+        ev.state = res["state"]
+        ev.smoothed_similarity = res["smoothed_similarity"]
+        return ev
