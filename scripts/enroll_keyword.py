@@ -97,7 +97,8 @@ def purge_old_keyword_data(target_keyword: str):
     for header in [
         os.path.join(base_dir, "src", "deployment", "esp32", "keyword_prototype.h"),
         os.path.join(base_dir, "src", "deployment", "esp32_wroom", "keyword_prototype.h"),
-        os.path.join(base_dir, "outputs", "esp32_wroom", "keyword_prototype.h")
+        os.path.join(base_dir, "outputs", "esp32_wroom", "keyword_prototype.h"),
+        os.path.join(base_dir, "outputs", "voice_activator_esp32_wroom", "keyword_prototype.h")
     ]:
         if os.path.exists(header):
             try:
@@ -333,6 +334,8 @@ static const float KEYWORD_PROTOTYPE[KEYWORD_PROTOTYPE_DIM] = {{
     base_proj_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     for wroom_dir in [
         os.path.join(base_proj_dir, 'outputs', 'esp32_wroom'),
+        os.path.join(base_proj_dir, 'outputs', 'esp32_wroom', 'voice_activator_esp32_wroom'),
+        os.path.join(base_proj_dir, 'outputs', 'voice_activator_esp32_wroom'),
         os.path.join(base_proj_dir, 'src', 'deployment', 'esp32_wroom')
     ]:
         if os.path.exists(wroom_dir):
