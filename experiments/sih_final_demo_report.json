@@ -1,11 +1,11 @@
 {
-  "timestamp": "2026-09-11 00:56:29",
+  "timestamp": "2026-09-11 10:10:01",
   "problem_statement": "SIH 26172 - Low Latency and Efficient Voice Activator for Edge Devices",
   "organization": "Indian Space Research Organisation (ISRO)",
   "enrollment_stage": {
     "target_keyword": "ZORA",
     "shots": 3,
-    "intra_similarity": 0.9926,
+    "intra_similarity": 0.9929,
     "prototype_norm": 1.0,
     "dimension": 32
   },
@@ -32,11 +32,11 @@
     "false_activations_count": 0,
     "confuser_word_rejection": {
       "confuser_word": "zero",
-      "max_similarity_observed": 0.797,
+      "max_similarity_observed": 0.7969,
       "threshold_tau_high": 0.9,
       "rejection_successful": true
     },
-    "average_per_chunk_inference_ms": 0.53,
+    "average_per_chunk_inference_ms": 0.36,
     "real_time_factor": 0.0
   },
   "asr_handover_stage": {
